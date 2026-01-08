@@ -1,0 +1,8 @@
+{
+  "llmProvider": "DeepSeek",
+  "llmModel": "deepseek-chat",
+  "llmTemperature": 0.1,
+  "enableVision": true,
+  "enableReasoning": true,
+  "maxSteps": 21
+}

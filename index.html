@@ -1,0 +1,1976 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Cart - Android AI自动化工具</title>
+    <!-- SheetJS库，用于解析Excel文件 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"></script>
+    <script>
+        // API Configuration
+        const API_CONFIG = {
+            baseUrl: 'http://localhost:8000'
+        };
+
+        // 场景配置
+        const SCENARIOS = {
+            SHOPPING: 'shopping',
+            // 预留其他场景
+        };
+
+        // 当前选择的场景
+        let currentScenario = SCENARIOS.SHOPPING;
+
+        // 场景配置数据
+        const SCENARIO_CONFIGS = {
+            [SCENARIOS.SHOPPING]: {
+                name: '购物场景',
+                description: '用于电商购物相关任务',
+                presetActions: {
+                    search: '搜索商品',
+                    browse: '浏览商品详情',
+                    addToCart: '加入购物车',
+                    viewCart: '查看购物车',
+                    checkout: '结算',
+                },
+                instructions: [
+                    '请确保设备已连接且Portal应用已安装',
+                    '支持自然语言描述购物任务，例如：',
+                    '"打开淘宝，搜索iPhone 15，查看第一个商品"',
+                    '"打开京东，搜索笔记本电脑，加入购物车"'
+                ]
+            }
+        };
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f8f9fa;
+            padding: 0;
+            line-height: 1.6;
+            color: #343a40;
+        }
+        
+        .app-container {
+            display: flex;
+            height: 100vh;
+            background-color: #f8f9fa;
+        }
+
+        .sidebar {
+            width: 280px;
+            background-color: #ffffff;
+            border-right: 1px solid #e9ecef;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 0;
+            overflow-y: auto;
+        }
+
+        .container {
+            max-width: 100%;
+            height: 100%;
+            background-color: #ffffff;
+            border-radius: 0;
+            padding: 0;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+            display: grid;
+            grid-template-columns: auto 1fr;
+            grid-template-rows: auto auto auto auto 1fr;
+            grid-gap: 1px;
+            grid-template-areas:
+                "header header"
+                "scenario scenario"
+                "task-input task-input"
+                "input-box input-box"
+                "history logs";
+        }
+        
+        h1 {
+            grid-area: header;
+            text-align: center;
+            color: #212529;
+            margin-bottom: 1px;
+            margin-left: 0;
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+        
+        /* 历史记录区域 */
+        .history {
+            grid-area: history;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 300px;
+            max-width: 300px;
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+            padding: 4px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+        }
+        
+        /* 滚动条样式 */
+        .history::-webkit-scrollbar,
+        .logs::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .history::-webkit-scrollbar-track,
+        .logs::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 2px;
+        }
+        
+        .history::-webkit-scrollbar-thumb,
+        .logs::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 2px;
+        }
+        
+        .history::-webkit-scrollbar-thumb:hover,
+        .logs::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+        
+        .history-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .history-item {
+            padding: 6px 10px;
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #495057;
+            font-size: 12px;
+        }
+        
+        .history-item:hover {
+            background-color: #e9ecef;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        
+        /* 日志输出区域 */
+        .logs {
+            grid-area: logs;
+            padding: 6px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            overflow-y: auto;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 11px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            color: #495057;
+            height: 100%;
+        }
+        
+        /* 任务输入区域 */
+        .task-area {
+            grid-area: task-input;
+            padding: 2px;
+        }
+        
+        /* 输入内容区域 */
+        .input-box {
+            grid-area: input-box;
+            padding: 4px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            text-align: left;
+            color: #495057;
+            font-size: 12px;
+            min-height: 60px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .input-box-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        /* 操作输入区域 */
+        .input-area {
+            grid-area: task-input;
+            padding: 8px;
+        }
+        
+        .input-area label {
+            display: block;
+            margin-bottom: 1px;
+            color: #6c757d;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .input-area textarea {
+            width: 100%;
+            height: 80px;
+            padding: 3px;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+            font-size: 14px;
+            resize: none;
+            font-family: inherit;
+            color: #495057;
+            transition: all 0.2s ease;
+        }
+        
+        .input-area textarea:focus {
+            outline: none;
+            border-color: #868e96;
+            box-shadow: 0 0 0 3px rgba(134, 142, 150, 0.1);
+        }
+        
+        /* 执行按钮区域 */
+        .submit-btn {
+            margin-top: 2px;
+            display: flex;
+            justify-content: flex-end;
+        }
+        
+        button {
+            padding: 7px 16px;
+            background-color: #495057;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: 0.5px;
+            width: auto;
+        }
+        
+        .task-mode-btn {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background-color: #343a40;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(73, 80, 87, 0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            background-color: #ced4da;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            font-size: 13px;
+            color: #495057;
+            cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 8px;
+            width: 16px;
+            height: 16px;
+        }
+        
+        /* 加载动画 */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            vertical-align: middle;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 结果显示 */
+        .result {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 16px 24px;
+            border-radius: 8px;
+            color: white;
+            font-size: 15px;
+            font-weight: 500;
+            z-index: 1000;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            transition: all 0.3s ease;
+            transform: translateY(-10px);
+            opacity: 0;
+        }
+        
+        .result.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        
+        .success {
+            background-color: #20c997;
+        }
+        
+        .error {
+            background-color: #dc3545;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+                height: auto;
+            }
+
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid #e9ecef;
+                padding: 16px;
+            }
+
+            .main-content {
+                padding: 16px;
+            }
+
+            .container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto auto auto;
+                grid-template-areas:
+                    "header"
+                    "history"
+                    "logs"
+                    "input-area"
+                    "submit-btn";
+                padding: 16px;
+            }
+
+            .input-box {
+                display: none;
+            }
+
+            .history {
+                flex-direction: row;
+                overflow-x: auto;
+                padding-bottom: 8px;
+            }
+
+            .history-item {
+                flex: 0 0 auto;
+                min-width: 120px;
+            }
+
+            .sidebar-section {
+                margin-bottom: 16px;
+            }
+
+            .device-status {
+                padding: 8px;
+            }
+        }
+        /* 侧边栏样式 */
+        .sidebar-header {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .sidebar-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #212529;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-subtitle {
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .sidebar-section {
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #495057;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .device-status {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        .device-status.connected {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+        }
+
+        .device-status.disconnected {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
+
+        .device-status-icon {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .device-status.connected .device-status-icon {
+            background-color: #17a2b8;
+        }
+
+        .device-status.disconnected .device-status-icon {
+            background-color: #dc3545;
+        }
+
+        .device-info {
+            flex: 1;
+        }
+
+        .device-name {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .device-details {
+            font-size: 12px;
+            color: #6c757d;
+        }
+
+        .config-item {
+            margin-bottom: 12px;
+        }
+
+        .config-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: #495057;
+            margin-bottom: 3px;
+        }
+
+        .config-input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #495057;
+        }
+
+        .config-input:focus {
+            outline: none;
+            border-color: #80bdff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        .config-select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #495057;
+            background-color: #fff;
+        }
+
+        .sidebar-button {
+            width: 100%;
+            padding: 8px 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-bottom: 6px;
+        }
+
+        .sidebar-button:hover {
+            background-color: #0056b3;
+        }
+
+        .sidebar-button.secondary {
+            background-color: #6c757d;
+        }
+
+        .sidebar-button.secondary:hover {
+            background-color: #545b62;
+        }
+
+        .sidebar-button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .task-mode-btn {
+            transition: all 0.2s ease;
+        }
+
+        .task-mode-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .task-mode-btn.active {
+            background-color: #007bff !important;
+            border-color: #007bff !important;
+            color: white !important;
+        }
+
+        /* ADB终端样式 */
+        .adb-terminal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 70%;
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+        }
+
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background-color: #222222;
+            border-bottom: 1px solid #444444;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .terminal-title {
+            font-weight: bold;
+            color: #cccccc;
+        }
+
+        .terminal-close {
+            background: none;
+            border: none;
+            color: #ffffff;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .terminal-close:hover {
+            background-color: #444444;
+        }
+
+        .terminal-body {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            padding: 16px;
+        }
+
+        .terminal-output {
+            flex: 1;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-bottom: 12px;
+        }
+
+        .terminal-input-line {
+            display: flex;
+            align-items: center;
+        }
+
+        .terminal-prompt {
+            color: #00ff00;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .terminal-input {
+            flex: 1;
+            background: none;
+            border: none;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: inherit;
+            padding: 0;
+            outline: none;
+        }
+
+        /* 终端输出样式 */
+        .terminal-output .command {
+            color: #00ff00;
+            font-weight: bold;
+        }
+
+        .terminal-output .success {
+            color: #ffffff;
+        }
+
+        .terminal-output .error {
+            color: #ff0000;
+        }
+
+        /* 终端滚动条样式 */
+        .terminal-output::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        .terminal-output::-webkit-scrollbar-track {
+            background: #222222;
+        }
+
+        .terminal-output::-webkit-scrollbar-thumb {
+            background: #555555;
+            border-radius: 4px;
+        }
+
+        .terminal-output::-webkit-scrollbar-thumb:hover {
+            background: #777777;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 侧边栏 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">Auto Cart</div>
+                <div class="sidebar-subtitle">Android AI自动化工具</div>
+            </div>
+
+            <!-- 设备状态 -->
+            <div class="sidebar-section">
+                <div class="section-title">设备状态</div>
+                <div class="device-status disconnected" id="deviceStatus">
+                    <div class="device-status-icon"></div>
+                    <div class="device-info">
+                        <div class="device-name" id="deviceName">未连接</div>
+                        <div class="device-details" id="deviceDetails">请连接Android设备</div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <button class="sidebar-button" id="connectDeviceBtn" style="flex: 1;">连接设备</button>
+                    <button class="sidebar-button secondary" id="wifiConnectBtn" style="flex: 1;">WiFi连接</button>
+                </div>
+                <button class="sidebar-button secondary" id="refreshDevicesBtn">刷新设备列表</button>
+                <div style="margin-top: 8px;">
+                    <input type="file" id="portalApkFile" accept=".apk" style="font-size: 12px; width: 100%; margin-bottom: 8px;">
+                    <button class="sidebar-button secondary" id="installPortalBtn" disabled>安装Portal</button>
+                </div>
+
+                <!-- 设备列表 -->
+                <div id="deviceList" style="display: none; margin-top: 12px;">
+                    <div class="section-title" style="font-size: 12px; margin-bottom: 8px;">可用设备</div>
+                    <div id="deviceListContent"></div>
+                </div>
+            </div>
+
+            <!-- LLM配置 -->
+            <div class="sidebar-section">
+                <div class="section-title">AI配置</div>
+                <div class="config-item">
+                    <label class="config-label">提供商</label>
+                    <select class="config-select" id="llmProvider">
+                        <option value="DeepSeek">DeepSeek</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label class="config-label">模型</label>
+                    <input type="text" class="config-input" id="llmModel" value="deepseek-chat">
+                </div>
+                <div class="config-item">
+                    <label class="config-label">温度</label>
+                    <input type="number" class="config-input" id="llmTemperature" value="0.1" min="0" max="1" step="0.1">
+                </div>
+                <button class="sidebar-button" id="saveConfigBtn">保存配置</button>
+            </div>
+
+            <!-- 高级选项 -->
+            <div class="sidebar-section">
+                <div class="section-title">高级选项</div>
+                <div class="config-item">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enableVision" checked>
+                        启用视觉分析
+                    </label>
+                </div>
+                <div class="config-item">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enableReasoning">
+                        启用复杂推理
+                    </label>
+                </div>
+                <div class="config-item">
+                    <label class="config-label">最大步骤数</label>
+                    <input type="number" class="config-input" id="maxSteps" value="20" min="1" max="50">
+                </div>
+            </div>
+
+            <!-- 开发者选项 -->
+            <div class="sidebar-section">
+                <div class="section-title">开发者选项</div>
+                <button class="sidebar-button" id="takeScreenshotBtn">截取屏幕</button>
+                <button class="sidebar-button" id="runAdbCommandBtn">执行ADB命令</button>
+                <button class="sidebar-button secondary" id="clearLogsBtn">清空日志</button>
+                <button class="sidebar-button secondary" id="exportLogsBtn">导出日志</button>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <div class="container">
+                <!-- 标题区域 -->
+                <h1 style="grid-area: header; text-align: center; margin-bottom: 5px;">任务执行</h1>
+                <!-- ADB终端界面 -->
+                <div class="adb-terminal" id="adbTerminal" style="display: none;">
+                    <div class="terminal-header">
+                        <div class="terminal-title">ADB命令终端</div>
+                        <button class="terminal-close" id="closeTerminalBtn">×</button>
+                    </div>
+                    <div class="terminal-body">
+                        <div class="terminal-output" id="terminalOutput"></div>
+                        <div class="terminal-input-line">
+                            <span class="terminal-prompt">> </span>
+                            <input type="text" class="terminal-input" id="terminalInput" autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+                <!-- 场景选择区域 -->
+        <div class="scenario-section" style="grid-area: scenario; padding: 3px 6px; background-color: #f8f9fa; border-radius: 3px; margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <h3 style="margin-bottom: 0; color: #495057; font-size: 11px; font-weight: 600; margin-top: 0;">场景选择</h3>
+            <select id="scenarioSelect" class="config-select" style="min-width: 120px; padding: 3px 6px; font-size: 11px; border: 1px solid #ced4da; border-radius: 3px; background-color: #fff; color: #495057; transition: all 0.2s ease;">
+                <option value="shopping" selected>🛒 购物场景</option>
+                <!-- 预留其他场景位置 -->
+            </select>
+            <div style="color: #6c757d; font-size: 10px;">
+                当前场景: <span id="currentScenarioText" style="color: #495057; font-weight: 500;">购物场景</span>
+            </div>
+            <div style="margin-left: auto;">
+                <select id="taskModeSelect" style="padding: 3px 10px; border: 1px solid #007bff; background: white; color: #495057; border-radius: 4px; cursor: pointer; font-size: 11px;">
+                    <option value="single" selected>单任务</option>
+                    <option value="batch">批量任务</option>
+                </select>
+            </div>
+        </div>
+        
+        <!-- 历史记录区域 -->
+        <div class="history">
+            <div class="history-title">历史记录</div>
+            <div class="history-item">打开音乐</div>
+            <div class="history-item">打开微信</div>
+            <div class="history-item">打开浏览器</div>
+        </div>
+        
+        <!-- 日志输出区域 -->
+        <div class="logs" id="logs">droidrun的日志输出</div>
+        
+        <!-- 输入内容区域 -->
+        <div class="input-box" style="grid-area: input-box; margin-bottom: 4px;">
+            <div class="input-box-title">当前操作</div>
+            <div id="currentAction">输入的内容</div>
+        </div>
+        
+        <!-- 单任务输入区域 -->
+        <div id="singleTaskArea" class="task-area">
+            <div class="input-area">
+                <label for="action">请输入需要执行的操作:</label>
+                <textarea id="action" placeholder="例如: 打开淘宝，搜索iPhone 15，查看第一个商品"></textarea>
+                
+                <!-- 购物场景预设任务 -->
+                <div id="shoppingPresets" class="presets-section" style="margin-top: 4px;">
+                    <label style="font-size: 10px; color: #6c757d; margin-bottom: 2px; display: block;">购物场景预设任务:</label>
+                    <div class="presets-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 4px; margin-bottom: 3px;">
+                        <button class="preset-btn" data-action="打开淘宝，搜索iPhone 15，查看第一个商品" style="padding: 3px 8px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 3px; font-size: 10px; cursor: pointer; transition: all 0.2s; color: #495057;">搜索商品</button>
+                        <button class="preset-btn" data-action="打开京东，浏览笔记本电脑分类，查看热门商品" style="padding: 3px 8px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 3px; font-size: 10px; cursor: pointer; transition: all 0.2s; color: #495057;">浏览分类</button>
+                        <button class="preset-btn" data-action="打开拼多多，搜索运动鞋，加入购物车" style="padding: 3px 8px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 3px; font-size: 10px; cursor: pointer; transition: all 0.2s; color: #495057;">加入购物车</button>
+                        <button class="preset-btn" data-action="打开淘宝，查看购物车，删除第一个商品" style="padding: 3px 8px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 3px; font-size: 10px; cursor: pointer; transition: all 0.2s; color: #495057;">管理购物车</button>
+                    </div>
+                </div>
+                
+                <div class="submit-btn">
+                    <button id="submitBtn">执行操作</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 批量任务输入区域 -->
+        <div id="batchTaskArea" class="task-area" style="display: none;">
+            <div class="input-area">
+                <label for="batchActions">请输入批量操作 (每行一个操作):</label>
+                <textarea id="batchActions" placeholder="打开淘宝&#10;搜索iPhone&#10;查看第一个商品&#10;加入购物车" rows="3"></textarea>
+                <div style="margin-top: 8px;">
+                    <label style="display: block; margin-bottom: 4px; color: #6c757d; font-size: 12px;">或导入任务文件:</label>
+                    <input type="file" id="batchFileImport" accept=".txt,.json,.xlsx,.xls" style="font-size: 12px; width: 100%;">
+                    <div id="fileImportStatus" style="margin-top: 4px; font-size: 11px; color: #6c757d;"></div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin: 4px 0; padding: 0 4px;">
+                <div style="flex: 1;">
+                    <label style="display: block; margin-bottom: 2px; color: #6c757d; font-size: 11px;">执行间隔 (秒)</label>
+                    <input type="number" id="batchInterval" value="2" min="0" max="10" step="0.5" style="width: 100%; padding: 4px 5px; border: 1px solid #ced4da; border-radius: 3px; font-size: 11px;">
+                </div>
+                <div style="flex: 1;">
+                    <label style="display: block; margin-bottom: 2px; color: #6c757d; font-size: 11px;">失败时继续</label>
+                    <input type="checkbox" id="continueOnError" checked style="margin-top: 2px; transform: scale(1);">
+                </div>
+            </div>
+
+            <div class="submit-btn">
+                <button id="submitBatchBtn">批量执行</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 结果显示区域 -->
+    <div class="result" id="result"></div>
+    
+    <script>
+        // 主UI元素
+        const actionInput = document.getElementById('action');
+        const submitBtn = document.getElementById('submitBtn');
+        const resultDiv = document.getElementById('result');
+        const logsDiv = document.getElementById('logs');
+        const currentActionDiv = document.getElementById('currentAction');
+        const historyDiv = document.querySelector('.history');
+        const historyTitle = document.querySelector('.history-title');
+        
+        // 场景选择UI元素
+        const scenarioSelect = document.getElementById('scenarioSelect');
+        const currentScenarioText = document.getElementById('currentScenarioText');
+
+        // 任务模式切换
+        const taskModeSelect = document.getElementById('taskModeSelect');
+        const singleTaskArea = document.getElementById('singleTaskArea');
+        const batchTaskArea = document.getElementById('batchTaskArea');
+        const batchActionsInput = document.getElementById('batchActions');
+        const batchIntervalInput = document.getElementById('batchInterval');
+        const continueOnErrorInput = document.getElementById('continueOnError');
+        const submitBatchBtn = document.getElementById('submitBatchBtn');
+        // 文件上传相关
+        const batchFileImport = document.getElementById('batchFileImport');
+        const fileImportStatus = document.getElementById('fileImportStatus');
+
+        // 场景选择初始化
+        function initScenarioSelection() {
+            // 绑定场景下拉选择事件
+            if (scenarioSelect) {
+                scenarioSelect.addEventListener('change', (e) => {
+                    selectScenario(e.target.value);
+                });
+            }
+            
+            // 绑定预设任务按钮事件
+            bindPresetButtons();
+        }
+        
+        // 绑定预设任务按钮事件
+        function bindPresetButtons() {
+            const presetBtns = document.querySelectorAll('.preset-btn');
+            presetBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.getAttribute('data-action');
+                    if (action) {
+                        actionInput.value = action;
+                        updateCurrentAction(action);
+                    }
+                });
+            });
+        }
+        
+        // 选择场景
+        function selectScenario(scenarioId) {
+            // 更新当前场景
+            currentScenario = scenarioId;
+            
+            // 更新UI显示
+            if (scenarioSelect) {
+                scenarioSelect.value = scenarioId;
+            }
+            
+            if (currentScenarioText) {
+                const scenarioConfig = SCENARIO_CONFIGS[scenarioId];
+                if (scenarioConfig) {
+                    currentScenarioText.textContent = scenarioConfig.name;
+                }
+            }
+            
+            // 显示场景相关提示
+            updateScenarioInstructions();
+        }
+        
+        // 更新场景说明
+        function updateScenarioInstructions() {
+            const scenarioConfig = SCENARIO_CONFIGS[currentScenario];
+            if (!scenarioConfig) return;
+            
+            console.log(`当前场景: ${scenarioConfig.name}`);
+            console.log(`场景说明: ${scenarioConfig.description}`);
+            console.log(`预设操作: ${JSON.stringify(scenarioConfig.presetActions)}`);
+        }
+
+        // 侧边栏元素
+        const deviceStatus = document.getElementById('deviceStatus');
+        const deviceName = document.getElementById('deviceName');
+        const deviceDetails = document.getElementById('deviceDetails');
+        const connectDeviceBtn = document.getElementById('connectDeviceBtn');
+        const wifiConnectBtn = document.getElementById('wifiConnectBtn');
+        const refreshDevicesBtn = document.getElementById('refreshDevicesBtn');
+        const installPortalBtn = document.getElementById('installPortalBtn');
+        const deviceList = document.getElementById('deviceList');
+        const deviceListContent = document.getElementById('deviceListContent');
+        const llmProvider = document.getElementById('llmProvider');
+        const llmModel = document.getElementById('llmModel');
+        const llmTemperature = document.getElementById('llmTemperature');
+        const saveConfigBtn = document.getElementById('saveConfigBtn');
+        const enableVision = document.getElementById('enableVision');
+        const enableReasoning = document.getElementById('enableReasoning');
+        const maxSteps = document.getElementById('maxSteps');
+
+        // 开发者选项元素
+        const takeScreenshotBtn = document.getElementById('takeScreenshotBtn');
+        const runAdbCommandBtn = document.getElementById('runAdbCommandBtn');
+        const clearLogsBtn = document.getElementById('clearLogsBtn');
+        const exportLogsBtn = document.getElementById('exportLogsBtn');
+
+        // 应用配置
+        let appConfig = {
+            llmProvider: 'DeepSeek',
+            llmModel: 'deepseek-chat',
+            llmTemperature: 0.1,
+            enableVision: true,
+            enableReasoning: false,
+            maxSteps: 20
+        };
+
+        // 任务模式切换
+        let currentTaskMode = 'single';
+
+        taskModeSelect.addEventListener('change', () => {
+            currentTaskMode = taskModeSelect.value;
+            if (currentTaskMode === 'single') {
+                singleTaskArea.style.display = 'block';
+                batchTaskArea.style.display = 'none';
+            } else {
+                singleTaskArea.style.display = 'none';
+                batchTaskArea.style.display = 'block';
+            }
+        });
+
+        // 读取文件内容的函数
+        function readFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = () => reject(new Error('文件读取失败'));
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // 解析Excel文件
+        async function parseExcelFile(content) {
+            // 使用SheetJS解析Excel文件
+            const workbook = XLSX.read(content, { type: 'array' });
+            // 获取第一个工作表
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            // 将工作表转换为JSON数据
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            
+            // 提取第一列作为任务列表（忽略空行）
+            const tasks = [];
+            for (const row of jsonData) {
+                if (row && row[0] && row[0].toString().trim()) {
+                    tasks.push(row[0].toString().trim());
+                }
+            }
+            
+            return tasks;
+        }
+
+        // 文件上传事件处理
+        batchFileImport.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const statusElement = fileImportStatus;
+            statusElement.textContent = '正在解析文件...';
+            statusElement.style.color = '#6c757d';
+            
+            try {
+                const content = await readFile(file);
+                let tasks = [];
+                
+                if (file.name.endsWith('.txt')) {
+                    // 解析TXT文件（按行拆分）
+                    const textContent = new TextDecoder().decode(content);
+                    tasks = textContent.split('\n').filter(line => line.trim());
+                } else if (file.name.endsWith('.json')) {
+                    // 解析JSON文件
+                    const textContent = new TextDecoder().decode(content);
+                    const jsonData = JSON.parse(textContent);
+                    tasks = Array.isArray(jsonData) ? jsonData : (jsonData.tasks || []);
+                } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+                    // 解析Excel文件
+                    tasks = await parseExcelFile(content);
+                } else {
+                    throw new Error('不支持的文件格式');
+                }
+                
+                if (tasks.length === 0) {
+                    throw new Error('文件中没有找到有效的任务');
+                }
+                
+                // 将任务填充到文本框
+                batchActionsInput.value = tasks.join('\n');
+                
+                statusElement.textContent = `成功导入 ${tasks.length} 个任务`;
+                statusElement.style.color = '#20c997';
+                
+            } catch (error) {
+                statusElement.textContent = `解析失败: ${error.message}`;
+                statusElement.style.color = '#dc3545';
+            }
+        });
+        
+        // 获取历史记录
+        async function fetchHistory() {
+            try {
+                const response = await fetch(API_CONFIG.baseUrl + '/history');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch history');
+                }
+                const history = await response.json();
+                renderHistory(history);
+            } catch (error) {
+                console.error('Error fetching history:', error);
+            }
+        }
+        
+        // 渲染历史记录
+        function renderHistory(history) {
+            // 清空现有历史记录（保留标题）
+            while (historyDiv.children.length > 1) {
+                historyDiv.removeChild(historyDiv.lastChild);
+            }
+            
+            if (history.length === 0) {
+                const emptyItem = document.createElement('div');
+                emptyItem.className = 'history-item';
+                emptyItem.textContent = '暂无历史记录';
+                emptyItem.style.color = '#999';
+                emptyItem.style.cursor = 'default';
+                emptyItem.style.background = '#f0f0f0';
+                historyDiv.appendChild(emptyItem);
+                return;
+            }
+            
+            // 创建新的历史记录项
+            history.forEach(item => {
+                const historyItem = document.createElement('div');
+                historyItem.className = 'history-item';
+                historyItem.textContent = item.action;
+                historyItem.title = `${item.success ? '成功' : '失败'}: ${item.reason}\n时间: ${new Date(item.timestamp).toLocaleString()}`;
+                
+                // 添加点击事件
+                historyItem.addEventListener('click', () => {
+                    actionInput.value = item.action;
+                    updateCurrentAction(item.action);
+                });
+                
+                historyDiv.appendChild(historyItem);
+            });
+        }
+        
+        // 执行按钮点击事件
+        submitBtn.addEventListener('click', async () => {
+            const action = actionInput.value.trim();
+            
+            if (!action) {
+                showResult('请输入需要执行的操作', 'error');
+                return;
+            }
+            
+            // 更新当前操作显示
+            updateCurrentAction(action);
+            
+            showLoading();
+            
+            // 清空之前的日志
+            logsDiv.innerHTML = '';
+            
+            try {
+                // 准备请求数据，包含当前场景信息
+                const requestData = {
+                    action,
+                    scenario: currentScenario,
+                };
+                
+                // 首先发送 POST 请求来启动执行
+                const response = await fetch(API_CONFIG.baseUrl + '/stream-execute', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData),
+                });
+                
+                // 检查响应是否成功
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                
+                // 获取响应的可读流
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                let resultJson = '';
+                
+                // 循环读取流中的数据
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    // 解码二进制数据为文本
+                    const chunk = decoder.decode(value, { stream: true });
+                    
+                    // 分割 SSE 格式的消息
+                    const messages = chunk.split('\n\n');
+                    
+                    for (const message of messages) {
+                        if (message.startsWith('data:')) {
+                            const jsonStr = message.slice(5).trim();
+                            if (jsonStr) {
+                                try {
+                                    const data = JSON.parse(jsonStr);
+                                    if (data.log) {
+                                        // 追加日志内容
+                                        logsDiv.innerHTML += data.log;
+                                        // 自动滚动到底部
+                                        logsDiv.scrollTop = logsDiv.scrollHeight;
+                                    }
+                                } catch (e) {
+                                    console.error('Error parsing log data:', e);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // 执行完成后更新历史记录
+                fetchHistory();
+                showResult('操作执行完成！', 'success');
+                
+            } catch (error) {
+                showResult(`请求失败：${error.message}`, 'error');
+                logsDiv.innerHTML = '无日志信息';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '执行操作';
+            }
+        });
+        
+        // 更新当前操作显示
+        function updateCurrentAction(action) {
+            currentActionDiv.textContent = action;
+        }
+        
+        function showLoading() {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<div class="loading"></div>执行中...';
+            // 清空之前的结果
+            hideResult();
+        }
+        
+        function showResult(message, type) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '执行操作';
+            
+            // 显示结果通知
+            resultDiv.className = `result ${type} show`;
+            resultDiv.innerHTML = message;
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                hideResult();
+            }, 3000);
+        }
+        
+        function hideResult() {
+            resultDiv.classList.remove('show');
+        }
+        
+        function showLogs(stdout, stderr) {
+            let logsContent = '';
+            
+            if (stdout) {
+                logsContent += stdout;
+            }
+            
+            if (stderr) {
+                if (logsContent) {
+                    logsContent += '\n\n';
+                }
+                logsContent += stderr;
+            }
+            
+            if (!logsContent) {
+                logsContent = '无日志信息';
+            }
+            
+            logsDiv.innerHTML = logsContent;
+        }
+        
+        // 设备管理功能
+        async function checkDeviceStatus() {
+            try {
+                const response = await fetch(API_CONFIG.baseUrl + '/device/status');
+                if (response.ok) {
+                    const status = await response.json();
+                    updateDeviceStatus(status);
+                }
+            } catch (error) {
+                console.error('Failed to check device status:', error);
+                updateDeviceStatus({ connected: false });
+            }
+        }
+
+        function updateDeviceStatus(status) {
+            if (status.connected) {
+                deviceStatus.className = 'device-status connected';
+                deviceName.textContent = status.name || 'Android设备';
+                deviceDetails.textContent = `Android ${status.version || ''} | ${status.model || ''}`;
+                connectDeviceBtn.textContent = '断开连接';
+
+                if (status.portal_installed) {
+                    installPortalBtn.textContent = 'Portal已安装';
+                    installPortalBtn.disabled = true;
+                } else {
+                    installPortalBtn.textContent = '安装Portal';
+                    installPortalBtn.disabled = false;
+                }
+            } else {
+                deviceStatus.className = 'device-status disconnected';
+                deviceName.textContent = '未连接';
+                deviceDetails.textContent = '请连接Android设备';
+                connectDeviceBtn.textContent = '连接设备';
+                installPortalBtn.textContent = '安装Portal';
+                installPortalBtn.disabled = true;
+            }
+        }
+
+        // USB连接设备
+        connectDeviceBtn.addEventListener('click', async () => {
+            const isConnected = deviceStatus.classList.contains('connected');
+
+            if (isConnected) {
+                // 断开连接
+                try {
+                    await fetch(API_CONFIG.baseUrl + '/device/disconnect', { method: 'POST' });
+                    showResult('设备已断开连接', 'success');
+                } catch (error) {
+                    showResult('断开连接失败', 'error');
+                }
+            } else {
+                // USB连接设备
+                await connectDevice('usb');
+            }
+
+            setTimeout(checkDeviceStatus, 2000);
+        });
+
+        // WiFi连接设备
+        wifiConnectBtn.addEventListener('click', async () => {
+            const ipAddress = prompt('请输入设备IP地址 (例如: 192.168.1.100):');
+            if (ipAddress && ipAddress.trim()) {
+                await connectDevice('wifi', ipAddress.trim());
+                setTimeout(checkDeviceStatus, 3000);
+            }
+        });
+
+        // 通用连接函数
+        async function connectDevice(type, ipAddress = null) {
+            try {
+                showResult(`正在${type === 'usb' ? 'USB' : 'WiFi'}连接设备...`, 'success');
+
+                const requestData = { type: type };
+                if (ipAddress) {
+                    requestData.ip_address = ipAddress;
+                }
+
+                const response = await fetch(API_CONFIG.baseUrl + '/device/connect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showResult(`${type === 'usb' ? 'USB' : 'WiFi'}连接成功: ${result.message}`, 'success');
+
+                    // 更新设备状态
+                    if (result.device) {
+                        updateDeviceStatus(result.device);
+                    }
+                } else {
+                    const error = await response.json();
+                    showResult(`${type === 'usb' ? 'USB' : 'WiFi'}连接失败: ${error.detail}`, 'error');
+                }
+            } catch (error) {
+                showResult(`${type === 'usb' ? 'USB' : 'WiFi'}连接失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 安装Portal应用
+        installPortalBtn.addEventListener('click', async () => {
+            try {
+                installPortalBtn.disabled = true;
+                installPortalBtn.textContent = '安装中...';
+
+                const portalApkFile = document.getElementById('portalApkFile');
+                let response;
+
+                if (portalApkFile && portalApkFile.files && portalApkFile.files.length > 0) {
+                    // 如果用户选择了文件，使用文件上传方式
+                    const file = portalApkFile.files[0];
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    response = await fetch(API_CONFIG.baseUrl + '/device/install-portal', {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    // 否则尝试从网络下载
+                    response = await fetch(API_CONFIG.baseUrl + '/device/install-portal', {
+                        method: 'POST'
+                    });
+                }
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showResult(result.message, 'success');
+                    // 更新设备状态
+                    setTimeout(checkDeviceStatus, 1000);
+                    // 清空文件选择
+                    if (portalApkFile) {
+                        portalApkFile.value = '';
+                    }
+                } else {
+                    // 尝试解析错误信息
+                    const errorData = await response.json().catch(() => ({}));
+                    const errorMessage = errorData.detail || '安装失败，请检查设备连接';
+                    showResult(`Portal应用安装失败: ${errorMessage}`, 'error');
+                }
+            } catch (error) {
+                showResult('安装失败：' + error.message, 'error');
+            } finally {
+                installPortalBtn.disabled = false;
+                installPortalBtn.textContent = '安装Portal';
+            }
+        });
+
+        // 保存配置
+        saveConfigBtn.addEventListener('click', () => {
+            appConfig = {
+                llmProvider: llmProvider.value,
+                llmModel: llmModel.value,
+                llmTemperature: parseFloat(llmTemperature.value),
+                enableVision: enableVision.checked,
+                enableReasoning: enableReasoning.checked,
+                maxSteps: parseInt(maxSteps.value)
+            };
+
+            // 保存到localStorage
+            localStorage.setItem('droidrun-config', JSON.stringify(appConfig));
+
+            showResult('配置已保存', 'success');
+
+            // 发送配置到后端
+            fetch(API_CONFIG.baseUrl + '/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(appConfig)
+            }).catch(error => console.error('Failed to save config to backend:', error));
+        });
+
+        // 加载配置
+        function loadConfig() {
+            const saved = localStorage.getItem('droidrun-config');
+            if (saved) {
+                appConfig = { ...appConfig, ...JSON.parse(saved) };
+            }
+
+            // 更新UI
+            llmProvider.value = appConfig.llmProvider;
+            llmModel.value = appConfig.llmModel;
+            llmTemperature.value = appConfig.llmTemperature;
+            enableVision.checked = appConfig.enableVision;
+            enableReasoning.checked = appConfig.enableReasoning;
+            maxSteps.value = appConfig.maxSteps;
+        }
+
+        // 初始化
+        updateCurrentAction(actionInput.value.trim());
+        fetchHistory();
+        loadConfig();
+        checkDeviceStatus();
+        initScenarioSelection();
+
+        // 开发者功能
+        takeScreenshotBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch(API_CONFIG.baseUrl + '/device/screenshot');
+                if (response.ok) {
+                    const result = await response.json();
+                    showResult('屏幕截图已保存', 'success');
+                    // 可以在这里添加显示截图的逻辑
+                } else {
+                    showResult('截图失败', 'error');
+                }
+            } catch (error) {
+                showResult('截图失败：' + error.message, 'error');
+            }
+        });
+
+        // ADB终端元素
+        const adbTerminal = document.getElementById('adbTerminal');
+        const terminalOutput = document.getElementById('terminalOutput');
+        const terminalInput = document.getElementById('terminalInput');
+        const closeTerminalBtn = document.getElementById('closeTerminalBtn');
+
+        // 显示终端界面
+        runAdbCommandBtn.addEventListener('click', () => {
+            adbTerminal.style.display = 'flex';
+            terminalInput.focus();
+            // 清空之前的输出
+            terminalOutput.innerHTML = 'ADB命令终端已启动\n输入ADB命令并按Enter键执行\n\n';
+        });
+
+        // 关闭终端界面
+        closeTerminalBtn.addEventListener('click', () => {
+            adbTerminal.style.display = 'none';
+        });
+
+        // 终端输入处理
+        terminalInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                const command = terminalInput.value.trim();
+                if (command) {
+                    // 显示输入的命令
+                    terminalOutput.innerHTML += `<span class="command">> ${command}</span>\n`;
+                    terminalInput.value = '';
+                    
+                    // 执行命令
+                    await executeAdbCommand(command);
+                    
+                    // 滚动到底部
+                    terminalOutput.scrollTop = terminalOutput.scrollHeight;
+                }
+            }
+        });
+
+        async function executeAdbCommand(command) {
+            try {
+                const response = await fetch(API_CONFIG.baseUrl + '/device/adb', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ command })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    terminalOutput.innerHTML += `<span class="success">${result.stdout || result.message}</span>\n`;
+                    if (result.stderr) {
+                        terminalOutput.innerHTML += `<span class="error">${result.stderr}</span>\n`;
+                    }
+                } else {
+                    const error = await response.json();
+                    terminalOutput.innerHTML += `<span class="error">错误: ${error.detail}</span>\n`;
+                }
+            } catch (error) {
+                terminalOutput.innerHTML += `<span class="error">异常: ${error.message}</span>\n`;
+            }
+        }
+
+        clearLogsBtn.addEventListener('click', () => {
+            logsDiv.innerHTML = '';
+            showResult('日志已清空', 'success');
+        });
+
+        exportLogsBtn.addEventListener('click', () => {
+            const logs = logsDiv.innerText;
+            if (!logs.trim()) {
+                showResult('没有日志可导出', 'error');
+                return;
+            }
+
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `droidrun-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showResult('日志已导出', 'success');
+        });
+
+        // 批量执行功能
+        submitBatchBtn.addEventListener('click', async () => {
+            const actions = batchActionsInput.value.trim().split('\n').filter(action => action.trim());
+            if (actions.length === 0) {
+                showResult('请输入至少一个操作', 'error');
+                return;
+            }
+
+            const interval = parseFloat(batchIntervalInput.value) * 1000; // 转换为毫秒
+            const continueOnError = continueOnErrorInput.checked;
+
+            submitBatchBtn.disabled = true;
+            submitBatchBtn.textContent = '批量执行中...';
+
+            try {
+                for (let i = 0; i < actions.length; i++) {
+                    const action = actions[i].trim();
+                    if (!action) continue;
+
+                    showResult(`执行任务 ${i + 1}/${actions.length}: ${action}`, 'success');
+                    currentActionDiv.textContent = action;
+
+                    try {
+                        await executeSingleAction(action);
+
+                        // 等待间隔（除了最后一个任务）
+                        if (i < actions.length - 1 && interval > 0) {
+                            await new Promise(resolve => setTimeout(resolve, interval));
+                        }
+                    } catch (error) {
+                        showResult(`任务 ${i + 1} 失败: ${error.message}`, 'error');
+                        if (!continueOnError) {
+                            break;
+                        }
+                    }
+                }
+
+                showResult('批量执行完成', 'success');
+            } catch (error) {
+                showResult('批量执行失败：' + error.message, 'error');
+            } finally {
+                submitBatchBtn.disabled = false;
+                submitBatchBtn.textContent = '批量执行';
+            }
+        });
+
+        // 辅助函数：执行单个操作（复用单任务逻辑）
+        async function executeSingleAction(action) {
+            showLoading();
+
+            try {
+                // 准备请求数据，包含当前场景信息
+                const requestData = {
+                    action,
+                    scenario: currentScenario,
+                };
+                
+                const response = await fetch(API_CONFIG.baseUrl + '/stream-execute', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData),
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const messages = chunk.split('\n\n');
+
+                    for (const message of messages) {
+                        if (message.startsWith('data:')) {
+                            const jsonStr = message.slice(5).trim();
+                            if (jsonStr) {
+                                try {
+                                    const data = JSON.parse(jsonStr);
+                                    if (data.log) {
+                                        logsDiv.innerHTML += data.log;
+                                        logsDiv.scrollTop = logsDiv.scrollHeight;
+                                    }
+                                } catch (e) {
+                                    console.error('Error parsing log data:', e);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                throw error;
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '执行操作';
+                hideResult();
+            }
+        }
+
+        // 更新CSS样式
+        const style = document.createElement('style');
+        style.textContent = `
+            .task-mode-btn.active {
+                background-color: #007bff !important;
+                color: white !important;
+                border-color: #007bff !important;
+            }
+            .task-area {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* ADB终端样式 */
+        .adb-terminal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 70%;
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background-color: #2d2d2d;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            border-bottom: 1px solid #444;
+        }
+        
+        .terminal-title {
+            font-weight: 500;
+            color: #cccccc;
+        }
+        
+        .terminal-close {
+            background: none;
+            border: none;
+            color: #ffffff;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        
+        .terminal-close:hover {
+            background-color: #444444;
+        }
+        
+        .terminal-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            overflow: hidden;
+        }
+        
+        .terminal-output {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: 10px;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+        
+        .terminal-output::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .terminal-output::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        
+        .terminal-output::-webkit-scrollbar-thumb {
+            background: #444444;
+            border-radius: 4px;
+        }
+        
+        .terminal-output::-webkit-scrollbar-thumb:hover {
+            background: #555555;
+        }
+        
+        .terminal-input-line {
+            display: flex;
+            align-items: center;
+            padding: 5px 0;
+        }
+        
+        .terminal-prompt {
+            color: #00ff00;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        
+        .terminal-input {
+            flex: 1;
+            background: none;
+            border: none;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: inherit;
+            outline: none;
+            padding: 0;
+        }
+        
+        .terminal-input:focus {
+            outline: none;
+        }
+        
+        /* 命令输出颜色 */
+        .terminal-output .command {
+            color: #00ff00;
+        }
+        
+        .terminal-output .success {
+            color: #ffffff;
+        }
+        
+        .terminal-output .error {
+            color: #ff0000;
+        }
+    `;
+        document.head.appendChild(style);
+
+        // 刷新设备列表
+        refreshDevicesBtn.addEventListener('click', async () => {
+            await refreshDeviceList();
+        });
+
+        // 刷新设备列表函数
+        async function refreshDeviceList() {
+            try {
+                const response = await fetch(API_CONFIG.baseUrl + '/devices');
+                if (response.ok) {
+                    const data = await response.json();
+                    displayDeviceList(data.devices);
+                    deviceList.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Failed to refresh device list:', error);
+                deviceList.style.display = 'none';
+            }
+        }
+
+        // 显示设备列表
+        function displayDeviceList(devices) {
+            if (devices.length === 0) {
+                deviceListContent.innerHTML = '<div style="color: #6c757d; font-size: 12px; padding: 8px;">未发现设备</div>';
+                return;
+            }
+
+            deviceListContent.innerHTML = devices.map(device => {
+                let statusColor = '#dc3545'; // red for disconnected
+                let statusText = '未连接';
+                let actionButton = '';
+
+                if (device.status === 'device') {
+                    statusColor = '#28a745'; // green for connected
+                    statusText = '已连接';
+                    if (device.portal_installed) {
+                        statusText += ' • Portal已安装';
+                    } else {
+                        actionButton = `<button class="device-connect-btn" onclick="installPortalOnDevice('${device.id}')" style="margin-top: 6px; padding: 4px 8px; font-size: 11px; background: #ffc107; color: #212529; border: none; border-radius: 3px; cursor: pointer;">安装Portal</button>`;
+                    }
+                } else if (device.status === 'unauthorized') {
+                    statusColor = '#ffc107'; // yellow for unauthorized
+                    statusText = '未授权 - 请在设备上允许USB调试';
+                    actionButton = `<button class="device-connect-btn" onclick="connectSpecificDevice('${device.id}')" style="margin-top: 6px; padding: 4px 8px; font-size: 11px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">重试连接</button>`;
+                } else if (device.status === 'offline') {
+                    statusColor = '#6c757d'; // gray for offline
+                    statusText = '离线';
+                    actionButton = `<button class="device-connect-btn" onclick="connectSpecificDevice('${device.id}')" style="margin-top: 6px; padding: 4px 8px; font-size: 11px; background: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer;">重试连接</button>`;
+                } else {
+                    actionButton = `<button class="device-connect-btn" onclick="connectSpecificDevice('${device.id}')" style="margin-top: 6px; padding: 4px 8px; font-size: 11px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">连接</button>`;
+                }
+
+                return `
+                    <div class="device-item" style="padding: 8px; border: 1px solid #e9ecef; border-radius: 4px; margin-bottom: 8px; background: #f8f9fa;">
+                        <div style="font-size: 12px; font-weight: 500; margin-bottom: 4px;">${device.name || device.id}</div>
+                        <div style="font-size: 11px; color: #6c757d; margin-bottom: 4px;">
+                            ${device.model || 'Unknown'} • Android ${device.version || 'Unknown'}
+                        </div>
+                        <div style="font-size: 11px; color: ${statusColor}; margin-bottom: 4px;">
+                            ${statusText}
+                        </div>
+                        ${actionButton}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 连接特定设备
+        async function connectSpecificDevice(deviceId) {
+            try {
+                showResult('正在连接设备...', 'success');
+
+                const response = await fetch(API_CONFIG.baseUrl + '/device/connect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ type: 'usb', device_id: deviceId })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showResult(`设备连接成功: ${result.message}`, 'success');
+
+                    // 刷新状态
+                    setTimeout(() => {
+                        checkDeviceStatus();
+                        refreshDeviceList();
+                    }, 2000);
+                } else {
+                    const error = await response.json();
+                    showResult(`设备连接失败: ${error.detail}`, 'error');
+                }
+            } catch (error) {
+                showResult('设备连接失败: ' + error.message, 'error');
+            }
+        }
+
+        // 在特定设备上安装Portal
+        async function installPortalOnDevice(deviceId) {
+            try {
+                showResult('正在安装Portal应用...', 'success');
+
+                const response = await fetch(API_CONFIG.baseUrl + '/device/install-portal', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showResult(`Portal安装成功: ${result.message}`, 'success');
+
+                    // 刷新设备列表
+                    setTimeout(refreshDeviceList, 2000);
+                } else {
+                    const error = await response.json();
+                    showResult(`Portal安装失败: ${error.detail}`, 'error');
+                }
+            } catch (error) {
+                showResult('Portal安装失败: ' + error.message, 'error');
+            }
+        }
+
+        // 页面加载时自动刷新一次设备列表
+        setTimeout(refreshDeviceList, 1000);
+
+        // 定期检查设备状态
+        setInterval(checkDeviceStatus, 5000);
+    </script>
+</body>
+</html>
